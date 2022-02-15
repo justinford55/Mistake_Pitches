@@ -1,0 +1,224 @@
+---
+title: "Mistake Pitches"
+author: "Justin Ford"
+date: "2/8/2022"
+output: 
+  html_document:
+    theme: "united"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE,
+                      warning = FALSE, 
+                      message = FALSE)
+```
+
+You know it when you see it: the batter's eyes light up, the pitcher's gaze drops to the ground in embarrassment, just before the bat connects. A meatball. Even casual baseball fans probably have some familiarity with the concept of a so-called "mistake pitch." The breaking ball that doesn't *quite* break enough, the fastball right down Broadway. Ultimately, I think the simplest definition of a mistake pitch is a pitch that's not just likely to get hit, but likely to get *crushed.* Of course, not every pitch that gets crushed should be classified as a "mistake," nor is every inaccuracy punished by the hitter. Sometimes, a batter puts a good swing on a good pitch. 
+
+If we can't rely purely on results to decide if a pitch was a "mistake" or not, how *can* we tell?
+
+
+
+I wanted to answer the question: what makes a pitch a mistake?
+
+I've already said that my definition of a mistake is a pitch that is likely to be crushed. So the first thing to do is find out what exactly "crushed" means. There are a couple of ways to do this: 
+
+*   Use Statcast's Barrel classification as a proxy for "crushed."
+*   Set a threshold for run value, where all batted balls over the threshold are considered crushed.
+*   Use the "best" batted balls by each hitter.
+
+
+```{r libraries, include = FALSE}
+library(tidyverse)
+library(baseballr)
+library(RMySQL)
+library(xgboost)
+library(MLmetrics)
+library(Ckmeans.1d.dp)
+library(mltools)
+library(data.table)
+```
+
+
+```{r get_data, include = FALSE, cache = TRUE}
+con <- dbConnect(MySQL(), dbname = "statcast", 
+                 user = "root", 
+                 password = "r93nMigop!", 
+                 host = "localhost")
+
+
+query <- "SELECT * FROM statcast_full WHERE game_year = 2021"
+
+sc <- dbGetQuery(con, query)
+
+dbDisconnect(con)
+```
+
+```{r preprocessing, include = FALSE, cache = TRUE}
+
+sc <- sc %>%
+  select(-row_names, -spin_dir:-break_length_deprecated, -game_type, -hit_location, -game_year, -on_3b:-on_1b,
+         -hc_x:-sv_id, -pitcher_1:-fielder_9)
+
+# these are the "chances" (swings + called strikes)
+# I want to train a model to predict the probability that a pitch will be swung at or
+#   called a strike
+chances <- c("called_strike", "foul", "foul_tip", "hit_into_play", 
+             "swinging_strike", "swinging_strike_blocked")
+
+# this step filters out all the bunt attempts that I can discern
+# Since players who are bunting aren't attempting to barrel the ball, I throw these pitches out.
+sc <- sc %>%
+  filter(!(type == "X" & grepl(" bunt", des))) %>%
+  filter(!(grepl("bunt", description))) %>%
+  mutate(chance = ifelse(description %in% chances, 1, 0))
+
+# this step takes features that measure in the x direction (horizontal movement/location)
+# and flips their sign (i.e. negative values become positive.)
+# This is done to make lefties pitches look like righties pitches to help the model train
+# more accurately.
+data <- sc %>%
+  mutate(plate_x = ifelse(p_throws == "L", -1*plate_x, plate_x),
+         pfx_x = ifelse(p_throws == "L", -1*pfx_x, pfx_x),
+         release_pos_x = ifelse(p_throws == "L", -1*release_pos_x, release_pos_x)) %>%
+  mutate_at(c("release_speed", "plate_x", "plate_z", "pfx_x", "pfx_z", "release_pos_x", "release_pos_z"),
+            ~(scale(.) %>% as.vector))
+
+# making some features
+data <- data %>%
+  mutate(barrel = ifelse(is.na(barrel), 0, barrel),
+         same_hand = ifelse(p_throws == stand, 1, 0),
+         stand = ifelse(stand == "R", 1, 0),
+         balls = ifelse(balls == 4, 3, balls),
+         count = factor(str_c(as.character(balls), as.character(strikes), sep = "-")),
+         chance = ifelse(description %in% chances, 1, 0)
+         )
+
+# one hot encoding categorical features that I want to include in the model
+data <- one_hot(as.data.table(data), cols = "count")
+
+```
+
+
+```{r model, include = FALSE, cache = TRUE}
+# Now that all of our data preprocessing is done, I have to split the train and test set.
+
+train_size <- floor(0.75 * nrow(data))
+set.seed(123)
+train_ind <- sample(seq_len(nrow(data)), size = train_size)
+
+train <- data[train_ind, ]
+valid <- data[-train_ind, ]
+
+# What we want to do is train two models:
+#   - A model that predicts the probability of a pitch being barrelled.
+#   - A model that predicts the probablitiy of a pitch being swung at or called for a strike.
+
+xgb_data <- train %>%
+  select(release_speed, same_hand, stand, plate_x, plate_z, pfx_x, pfx_z, release_pos_x, release_pos_z, 
+         `count_0-0`, `count_1-0`, `count_2-0`, `count_3-0`, 
+         `count_0-1`, `count_1-1`, `count_2-1`, `count_3-1`,
+         `count_0-2`, `count_1-2`, `count_2-2`, `count_3-2`)
+
+barrel_label <- train$barrel
+chance_label <- train$chance
+
+# run cv to find nrounds for models
+barrel_cv <- xgb.cv(data = as.matrix(xgb_data), label = barrel_label, nrounds = 50, nthread = 2, nfold = 5,
+                    metrics = "logloss", max_depth = 3, eta = 1, objective = "binary:logistic")
+
+chance_cv <- xgb.cv(data = as.matrix(xgb_data), label = chance_label, nrounds = 175, nthread = 2, nfold = 5,
+                    metrics = "logloss", max_depth = 3, eta = 1, objective = "binary:logistic")
+
+# getting the proper number of model iterations to prevent under/overfitting
+eval_log <- as.data.frame(barrel_cv$evaluation_log)
+nrounds_barrel <- which.min(eval_log$test_logloss_mean)
+
+eval_log <- as.data.frame(chance_cv$evaluation_log)
+nrounds_chance <- which.min(eval_log$test_logloss_mean)
+#nrounds_chance <- 136
+
+# train models
+barrel_mod <- xgboost(data = as.matrix(xgb_data), label = barrel_label, max.depth = 3, 
+                   eta = 1, nthread = 2, nrounds = nrounds_barrel, objective = "binary:logistic")
+
+chance_mod <- xgboost(data = as.matrix(xgb_data), label = chance_label, max.depth = 3,
+                      eta = 1, nthread = 2, nrounds = nrounds_chance, objective = "binary:logistic")
+
+xgb_valid <- valid %>%
+  select(release_speed, same_hand, stand, plate_x, plate_z, pfx_x, pfx_z, release_pos_x, release_pos_z,
+         `count_0-0`, `count_1-0`, `count_2-0`, `count_3-0`, 
+         `count_0-1`, `count_1-1`, `count_2-1`, `count_3-1`,
+         `count_0-2`, `count_1-2`, `count_2-2`, `count_3-2`)
+
+# make preds on validation set
+barrel_preds <- predict(barrel_mod, as.matrix(xgb_valid))
+chance_preds <- predict(chance_mod, as.matrix(xgb_valid))
+
+barrel_loss <- LogLoss(barrel_preds, valid$barrel)
+chance_loss <- LogLoss(chance_preds, valid$chance)
+
+
+# Compute feature importance matrix
+barrel_importance <- xgb.importance(colnames(xgb_data), model = barrel_mod)
+chance_importance <- xgb.importance(colnames(xgb_data), model = chance_mod)
+
+```
+
+```{r importance}
+
+# Nice graph
+xgb.ggplot.importance(barrel_importance[1:10,]) +
+  theme_bw() +
+  theme(
+    legend.position = "none"
+  ) +
+  labs(
+    title = "Feature Importance for XGBoost Model Predicting Barrels"
+  )
+
+
+```
+
+```{r predict, include = FALSE}
+
+xgb.plot.importance(chance_importance[1:10,])
+
+data <- data %>%
+  select(release_speed, same_hand, stand, plate_x, plate_z, pfx_x, pfx_z, release_pos_x, release_pos_z,
+         `count_0-0`, `count_1-0`, `count_2-0`, `count_3-0`, 
+         `count_0-1`, `count_1-1`, `count_2-1`, `count_3-1`,
+         `count_0-2`, `count_1-2`, `count_2-2`, `count_3-2`)
+
+full_barrel_preds <- predict(barrel_mod, as.matrix(data))
+full_chance_preds <- predict(chance_mod, as.matrix(data))
+
+sc$xBarrel <- full_barrel_preds
+sc$xChance <- full_chance_preds
+
+```
+
+
+```{r xbarrel_plot}
+
+sc %>%
+  filter(xBarrel > 0.1) %>%
+  ggplot(aes(plate_x, plate_z)) +
+  geom_point(size = 4, alpha = 0.5, aes()) +
+  geom_segment(x = -5/6, y = 3.67, xend = -5/6 , yend = 1.52) + # draw strikezone
+  geom_segment(x = 5/6, y = 3.67, xend = 5/6 , yend = 1.52) +
+  geom_segment(x = -5/6, y = 3.67, xend = 5/6 , yend = 3.67) +
+  geom_segment(x = -5/6, y = 1.52, xend = 5/6 , yend = 1.52) +
+  coord_fixed() +
+  theme_bw() +
+  xlim(-1,1) +
+  ylim(1.5,3.75)
+
+
+```
+
+
+```{r}
+
+```
+
