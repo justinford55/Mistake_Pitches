@@ -13,22 +13,18 @@ knitr::opts_chunk$set(echo = FALSE,
                       message = FALSE)
 ```
 
-You know it when you see it: the batter's eyes light up, the pitcher's gaze drops to the ground in embarrassment, just before the bat connects. A meatball. Even casual baseball fans probably have some familiarity with the concept of a so-called "mistake pitch." The breaking ball that doesn't *quite* break enough, the fastball right down Broadway. Ultimately, I think the simplest definition of a mistake pitch is a pitch that's not just likely to get hit, but likely to get *crushed.* Of course, not every pitch that gets crushed should be classified as a "mistake," nor is every inaccuracy punished by the hitter. Sometimes, a batter puts a good swing on a good pitch. 
+You know it when you see it: the batter's eyes light up, the pitcher's gaze drops to the ground in embarrassment, just before the bat connects. A meatball. Even casual baseball fans probably have some familiarity with the concept of a so-called "mistake pitch." The breaking ball that doesn't *quite* break enough, the fastball right down Broadway. Ultimately, I think the simplest definition of a mistake pitch is a pitch that's not just likely to get hit, but likely to get *crushed.* Of course, not every pitch that gets crushed should be classified as a "mistake," nor is every inaccuracy punished by the hitter. Sometimes, a batter puts a good swing on a good pitch. Then how can we discern if a pitch is likely to get crushed or not? What makes a pitch a mistake pitch?
 
-If we can't rely purely on results to decide if a pitch was a "mistake" or not, how *can* we tell?
+The first step is to find out what exactly "crushed" means. There are a few ways to do this: 
 
+*   Set a threshold for run value, where all batted balls over the threshold are considered crushed. However, run values don't always correlate closely with how "well-hit" a batted ball is. Bloopers tend to have a high run value because they fall for hits often, but wouldn't be considered to be hit squarely or hard. 
+*   Use Statcast's Barrel classification as a proxy for "crushed." This is the simplest and most direct option, because these are literally the batted balls that Statcast defines as "hit well." The one issue with using barrels is that batters will have widely differing abilities to hit barrels. Some hitters, like David Fletcher or Myles Straw, will rarely ever have a batted ball classified as a "Barrel," even if they hit it as well as they can. Does that mean it's impossible to throw a mistake pitch to David Fletcher? I don't think so. 
+*   Use the subset of the "best" batted balls by each hitter. This solves the problem with using Statcast Barrels. However, I would need to devise a system to come up with evaluating with batted balls are the "best," or rather, "most crushed." The best way I could think to evaluate batted balls is by using run values or the built-in "estimated_woba_using_speedangle" column   
 
-
-I wanted to answer the question: what makes a pitch a mistake?
-
-I've already said that my definition of a mistake is a pitch that is likely to be crushed. So the first thing to do is find out what exactly "crushed" means. There are a couple of ways to do this: 
-
-*   Use Statcast's Barrel classification as a proxy for "crushed."
-*   Set a threshold for run value, where all batted balls over the threshold are considered crushed.
-*   Use the "best" batted balls by each hitter.
-
+For simplicity's sake, I decided to just use Barrels as my stand-in for "crushed." 
 
 ```{r libraries, include = FALSE}
+source("config.R")
 library(tidyverse)
 library(baseballr)
 library(RMySQL)
@@ -39,12 +35,13 @@ library(mltools)
 library(data.table)
 ```
 
+So, looking at every pitch from the 2021 season (data retreived using the excellent baseballr package for scraping from Baseball Savant), I wanted to construct a model that would predict the probability that a given pitch would be barrelled. 
 
 ```{r get_data, include = FALSE, cache = TRUE}
-con <- dbConnect(MySQL(), dbname = "statcast", 
-                 user = "root", 
-                 password = "r93nMigop!", 
-                 host = "localhost")
+con <- dbConnect(MySQL(), dbname = dbname, 
+                 user = user, 
+                 password = password, 
+                 host = host)
 
 
 query <- "SELECT * FROM statcast_full WHERE game_year = 2021"
@@ -180,6 +177,8 @@ xgb.ggplot.importance(barrel_importance[1:10,]) +
 
 ```
 
+
+
 ```{r predict, include = FALSE}
 
 xgb.plot.importance(chance_importance[1:10,])
@@ -197,6 +196,7 @@ sc$xBarrel <- full_barrel_preds
 sc$xChance <- full_chance_preds
 
 ```
+
 
 
 ```{r xbarrel_plot}

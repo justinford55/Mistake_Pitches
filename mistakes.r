@@ -20,7 +20,7 @@
 
 # .0674
 
-
+source(file = "config.R")
 library(tidyverse)
 library(baseballr)
 library(RMySQL)
@@ -31,10 +31,10 @@ library(mltools)
 library(data.table)
 library(SHAPforxgboost)
 
-con <- dbConnect(MySQL(), dbname = "statcast", 
-                 user = "root", 
-                 password = "r93nMigop!", 
-                 host = "localhost")
+con <- dbConnect(MySQL(), dbname = dbname, 
+                 user = user, 
+                 password = password, 
+                 host = host)
 
 
 query <- "SELECT * FROM statcast_full WHERE game_year = 2021"
@@ -350,6 +350,8 @@ sc %>%
 
 
 # What percentage of bip are barrels?
+# If I wanted to change my target from barrels to "barrels adjusted for batter," I would want to take the
+# top X % of each batter's batted balls, where X is the percentage of total balls in play that are barrels 
 
 sc %>%
   filter(type == "X") %>%
@@ -369,3 +371,27 @@ sc %>%
             n = n())
 
 colSums(is.na(sc))
+
+
+# Let's write a for loop that goes through each pitch and splits the data into 4 or 5 partitions
+# by some feature like x_mov or velocity then we can summarize these partitions by barrel rate or xbarrels etc.
+
+
+sl <- sc %>%
+  filter(p_throws == "R") %>%
+  filter(pitch_type == "SL")
+
+
+slr <- quantile(sl$pfx_x, probs = seq(0, 1, 0.25))
+
+sl <- sl %>%
+  mutate(movz_bin = case_when(
+    pfx_x > slr[4] ~ 4,
+    pfx_x > slr[3] ~ 3,
+    pfx_x > slr[2] ~ 2,
+    TRUE ~ 1
+  ))
+
+sl %>%
+  group_by(movz_bin) %>%
+  summarize(barrel_rate = mean(barrel, na.rm = TRUE))
