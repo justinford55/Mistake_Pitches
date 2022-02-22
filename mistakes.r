@@ -31,6 +31,8 @@ library(mltools)
 library(data.table)
 library(SHAPforxgboost)
 
+options(scipen = 999999)
+
 con <- dbConnect(MySQL(), dbname = dbname, 
                  user = user, 
                  password = password, 
@@ -59,30 +61,29 @@ sc <- sc %>%
 
 ##### DATA PRE-PROCESSING ######################################################
 
+
+# this step filters out all the bunt attempts that I can discern
+# Since players who are bunting aren't attempting to barrel the ball, I throw these pitches out.
+# I also filter out the few observations that don't have location, pitch velo or release position data.
+sc <- sc %>%
+  filter(!(type == "X" & grepl(" bunt", des))) %>%
+  filter(!(grepl("bunt", description))) %>%
+  filter(!is.na(plate_x) | !is.na(release_speed) | !is.na(release_pos_z))
+
+# this step takes features that measure in the x direction (horizontal movement/location)
+# and flips their sign (i.e. negative values become positive.)
+# This is done to make lefties' pitches look like righties' pitches to help the model train
+# more accurately.
+data <- sc %>%
+  mutate(plate_x = ifelse(p_throws == "L", -1*plate_x, plate_x),
+         pfx_x = ifelse(p_throws == "L", -1*pfx_x, pfx_x),
+         release_pos_x = ifelse(p_throws == "L", -1*release_pos_x, release_pos_x))
+
 # these are the "chances" (swings + called strikes)
 # I want to train a model to predict the probability that a pitch will be swung at or
 #   called a strike
 chances <- c("called_strike", "foul", "foul_tip", "hit_into_play", 
              "swinging_strike", "swinging_strike_blocked")
-
-# this step filters out all the bunt attempts that I can discern
-# Since players who are bunting aren't attempting to barrel the ball, I throw these pitches out.
-sc <- sc %>%
-  filter(!(type == "X" & grepl(" bunt", des))) %>%
-  filter(!(grepl("bunt", description))) %>%
-  filter(!is.na(plate_x) | !is.na(release_speed) | !is.na(release_pos_z)) %>%
-  mutate(chance = ifelse(description %in% chances, 1, 0))
-
-# this step takes features that measure in the x direction (horizontal movement/location)
-# and flips their sign (i.e. negative values become positive.)
-# This is done to make lefties pitches look like righties pitches to help the model train
-# more accurately.
-data <- sc %>%
-  mutate(plate_x = ifelse(p_throws == "L", -1*plate_x, plate_x),
-         pfx_x = ifelse(p_throws == "L", -1*pfx_x, pfx_x),
-         release_pos_x = ifelse(p_throws == "L", -1*release_pos_x, release_pos_x)) %>%
-  mutate_at(c("release_speed", "plate_x", "plate_z", "pfx_x", "pfx_z", "release_pos_x", "release_pos_z"),
-            ~(scale(.) %>% as.vector))
 
 # making some features
 data <- data %>%
@@ -136,19 +137,6 @@ nrounds_barrel <- which.min(eval_log$test_logloss_mean)
 
 barrel_mod <- xgboost(data = as.matrix(xgb_data), label = barrel_label, max.depth = 3, 
                       eta = 1, nthread = 2, nrounds = nrounds_barrel, objective = "binary:logistic")
-
-
-# shap_values <- shap.values(xgb_model = barrel_mod, X_train = as.matrix(xgb_data))
-# shap_values$mean_shap_score
-# 
-# shap_scores <- shap_values$shap_score
-# 
-# # shap.prep() returns the long-format SHAP data from either model or
-# shap_scores_long <- shap.prep(xgb_model = barrel_mod, X_train = as.matrix(xgb_data))
-# # is the same as: using given shap_contrib
-# shap_scores_long <- shap.prep(shap_contrib = shap_scores, X_train = as.matrix(xgb_data))
-# 
-# shap.plot.summary(shap_scores_long)
 
 
 xgb_valid <- valid %>%
@@ -217,7 +205,7 @@ full_chance_preds <- predict(chance_mod, as.matrix(data))
 
 sc$xChance <- full_chance_preds
 
-mistake_thresh <- 0.15
+mistake_thresh <- 0.1
 
 
 
@@ -245,11 +233,9 @@ sc %>%
   geom_segment(x = -5/6, y = 3.67, xend = 5/6 , yend = 3.67) +
   geom_segment(x = -5/6, y = 1.52, xend = 5/6 , yend = 1.52) +
   coord_fixed() +
-  theme_bw() +
-  xlim(-1,1) +
-  ylim(1.5,3.75)
+  theme_bw()
 
-playername_lookup(608337)
+chadwick_player_lu_table <- get_chadwick_lu()
 
 chadwick_player_lu_table <- chadwick_player_lu_table %>%
   select(name_first, name_last, key_mlbam)
@@ -322,6 +308,7 @@ sc %>%
   ggplot(aes(plate_x, plate_z, z = xBarrel)) + 
   geom_tile(binwidth = .25, stat = "summary_2d", fun = mean, 
               na.rm = TRUE) +
+  geom_rect(aes(xmin = -5/6, xmax = 5/6, ymin = 1.52, ymax = 3.67), color = "white", alpha = 0) +
   theme_bw() +
   coord_fixed() +
   labs(
@@ -338,15 +325,16 @@ sc %>%
   ggplot(aes(plate_x, plate_z, z = barrel)) + 
   geom_tile(binwidth = .25, stat = "summary_2d", fun = mean, 
             na.rm = TRUE) +
+  geom_rect(aes(xmin = -5/6, xmax = 5/6, ymin = 1.52, ymax = 3.67), color = "white", alpha = 0) +
   theme_bw() +
   coord_fixed() +
   labs(
     x = "Horizontal Pitch Location",
     y = "Vertical Pitch Location",
     title = "Barrel Rate (per pitch) by Pitch Location",
+    subtitle = "(Catcher's Perspective)",
     fill = "Barrels/Pitch"
   )
-
 
 
 # What percentage of bip are barrels?
@@ -377,21 +365,4 @@ colSums(is.na(sc))
 # by some feature like x_mov or velocity then we can summarize these partitions by barrel rate or xbarrels etc.
 
 
-sl <- sc %>%
-  filter(p_throws == "R") %>%
-  filter(pitch_type == "SL")
-
-
-slr <- quantile(sl$pfx_x, probs = seq(0, 1, 0.25))
-
-sl <- sl %>%
-  mutate(movz_bin = case_when(
-    pfx_x > slr[4] ~ 4,
-    pfx_x > slr[3] ~ 3,
-    pfx_x > slr[2] ~ 2,
-    TRUE ~ 1
-  ))
-
-sl %>%
-  group_by(movz_bin) %>%
-  summarize(barrel_rate = mean(barrel, na.rm = TRUE))
+# loss is .0674 for original model
