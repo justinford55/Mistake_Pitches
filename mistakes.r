@@ -366,3 +366,4 @@ colSums(is.na(sc))
 
 
 # loss is .0674 for original model
+# the loss is .0676 for the other model.
