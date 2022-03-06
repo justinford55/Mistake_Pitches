@@ -61,6 +61,11 @@ sc <- sc %>%
 
 ##### DATA PRE-PROCESSING ######################################################
 
+# these are the "chances" (swings + called strikes)
+# I want to train a model to predict the probability that a pitch will be swung at or
+#   called a strike
+chances <- c("called_strike", "foul", "foul_tip", "hit_into_play", 
+             "swinging_strike", "swinging_strike_blocked")
 
 # this step filters out all the bunt attempts that I can discern
 # Since players who are bunting aren't attempting to barrel the ball, I throw these pitches out.
@@ -68,7 +73,15 @@ sc <- sc %>%
 sc <- sc %>%
   filter(!(type == "X" & grepl(" bunt", des))) %>%
   filter(!(grepl("bunt", description))) %>%
-  filter(!is.na(plate_x) | !is.na(release_speed) | !is.na(release_pos_z))
+  filter(!is.na(plate_x) | !is.na(release_speed) | !is.na(release_pos_z)) %>%
+  mutate(chance = ifelse(description %in% chances, 1, 0))
+
+sc %>%
+  group_by(barrel) %>%
+  mutate(barrel = ifelse(is.na(barrel), 0, barrel)) %>%
+  summarize(n = n())
+
+# 1.5 % of pitches are barrels.
 
 # this step takes features that measure in the x direction (horizontal movement/location)
 # and flips their sign (i.e. negative values become positive.)
@@ -79,11 +92,7 @@ data <- sc %>%
          pfx_x = ifelse(p_throws == "L", -1*pfx_x, pfx_x),
          release_pos_x = ifelse(p_throws == "L", -1*release_pos_x, release_pos_x))
 
-# these are the "chances" (swings + called strikes)
-# I want to train a model to predict the probability that a pitch will be swung at or
-#   called a strike
-chances <- c("called_strike", "foul", "foul_tip", "hit_into_play", 
-             "swinging_strike", "swinging_strike_blocked")
+
 
 # making some features
 data <- data %>%
@@ -92,8 +101,10 @@ data <- data %>%
          stand = ifelse(stand == "R", 1, 0),
          balls = ifelse(balls == 4, 3, balls),
          count = factor(str_c(as.character(balls), as.character(strikes), sep = "-")),
-         chance = ifelse(description %in% chances, 1, 0)
-         )
+         pitch_type = case_when(
+           pitch_type %in% c("FT", "FA") ~ "FF",
+           TRUE ~ pitch_type),
+         pitch_type = factor(pitch_type))
 
 # one hot encoding categorical features that I want to include in the model
 data <- one_hot(as.data.table(data), cols = "count")
@@ -102,9 +113,6 @@ data <- one_hot(as.data.table(data), cols = "count")
 # Now that all of our data preprocessing is done, I have to split the train and test set.
 
 ##### MODEL BUILDING ###########################################################
-
-
-
 
 train_size <- floor(0.75 * nrow(data))
 set.seed(123)
@@ -117,26 +125,131 @@ valid <- data[-train_ind, ]
 #   - A model that predicts the probability of a pitch being barrelled.
 #   - A model that predicts the probablitiy of a pitch being swung at or called for a strike.
 
+# Tuning
+
+# grid <- grid_latin_hypercube(
+#   # this finalize thing is because mtry depends on # of columns in data
+#   finalize(mtry(), train),
+#   min_n(),
+#   tree_depth(),
+#   # to force learn_rate to not be crazy small like dials defaults to
+#   # because my computer is slow
+#   # if you're trying this for a different problem, expand the range here
+#   # by using more negative values
+#   learn_rate(range = c(-1.5, -0.5), trans = log10_trans()),
+#   loss_reduction(),
+#   sample_size = sample_prop(),
+#   size = 4
+#   ) %>%
+#   mutate(
+#     # has to be between 0 and 1 for xgb
+#     # for some reason mtry gives the number of columns rather than proportion
+#     mtry = mtry / length(train),
+#     # see note below
+#   ) %>%
+#   # make these the right names for xgb
+#   dplyr::rename(
+#     eta = learn_rate,
+#     gamma = loss_reduction,
+#     subsample = sample_size,
+#     colsample_bytree = mtry,
+#     max_depth = tree_depth,
+#     min_child_weight = min_n
+#   )
+# 
+# grid
+# 
+
+xgb_data <- train %>%
+  select(release_speed, same_hand, stand, plate_x, plate_z, pfx_x, pfx_z, release_pos_x, release_pos_z,
+         `count_0-0`, `count_1-0`, `count_2-0`, `count_3-0`,
+         `count_0-1`, `count_1-1`, `count_2-1`, `count_3-1`,
+         `count_0-2`, `count_1-2`, `count_2-2`, `count_3-2`)
+
+# 
+# # function to perform xgb.cv for a given row in a hyperparameter grid
+# get_row <- function(row) {
+#   params <-
+#     list(
+#       booster = "gbtree",
+#       objective = "binary:logistic",
+#       eval_metric = c("logloss"),
+#       eta = row$eta,
+#       gamma = row$gamma,
+#       subsample = row$subsample,
+#       colsample_bytree = row$colsample_bytree,
+#       max_depth = row$max_depth,
+#       min_child_weight = row$min_child_weight
+#     )
+# 
+#   # do the cross validation
+#   wp_cv_model <- xgb.cv(
+#     data = as.matrix(xgb_data),
+#     label = train$barrel,
+#     params = params,
+#     # this doesn't matter with early stopping in xgb.cv, just set a big number
+#     # the actual optimal rounds will be found in this tuning process
+#     nrounds = 15000,
+#     metrics = list("logloss"),
+#     early_stopping_rounds = 50,
+#     print_every_n = 50,
+#     nfold = 5
+#   )
+# 
+#   # bundle up the results together for returning
+#   output <- params
+#   output$iter <- wp_cv_model$best_iteration
+#   output$logloss <- wp_cv_model$evaluation_log[output$iter]$test_logloss_mean
+# 
+#   row_result <- bind_rows(output)
+# 
+#   return(row_result)
+# }
+# 
+# start_time <- Sys.time()
+# 
+# # get results
+# results <- purrr::map_df(1:nrow(grid), function(x) {
+#   get_row(grid %>% dplyr::slice(x))
+# })
+# 
+# end_time <- Sys.time()
+# 
+# 
+# 
+# best_model <- results %>%
+#   dplyr::arrange(logloss) %>%
+#   dplyr::slice(1)
+# 
+# params <-
+#   list(
+#     booster = "gbtree",
+#     eval_metric = c("logloss"),
+#     eta = best_model$eta,
+#     gamma = best_model$gamma,
+#     subsample = best_model$subsample,
+#     colsample_bytree = best_model$colsample_bytree,
+#     max_depth = best_model$max_depth,
+#     min_child_weight = best_model$min_child_weight
+#   )
+# 
+# nrounds_barrel <- best_model$iter
+# 
+# params
 
 # XGBOOST
 # barrel model
 
-xgb_data <- train %>%
-  select(release_speed, same_hand, stand, plate_x, plate_z, pfx_x, pfx_z, release_pos_x, release_pos_z, 
-         `count_0-0`, `count_1-0`, `count_2-0`, `count_3-0`, 
-         `count_0-1`, `count_1-1`, `count_2-1`, `count_3-1`,
-         `count_0-2`, `count_1-2`, `count_2-2`, `count_3-2`)
-
 barrel_label <- train$barrel
 
-barrel_cv <- xgb.cv(data = as.matrix(xgb_data), label = barrel_label, nrounds = 50, nthread = 2, nfold = 5,
-                    metrics = "logloss", max_depth = 3, eta = 1, objective = "binary:logistic")
+barrel_cv <- xgb.cv(data = as.matrix(xgb_data), label = barrel_label, nrounds = 150, nfold = 5,
+                    early_stopping_rounds = 50, metrics = "logloss", eta = 0.1, objective = "binary:logistic")
 
 eval_log <- as.data.frame(barrel_cv$evaluation_log)
 nrounds_barrel <- which.min(eval_log$test_logloss_mean)
 
-barrel_mod <- xgboost(data = as.matrix(xgb_data), label = barrel_label, max.depth = 3, 
-                      eta = 1, nthread = 2, nrounds = nrounds_barrel, objective = "binary:logistic")
+barrel_mod <- xgboost(data = as.matrix(xgb_data), label = barrel_label, eta = 0.1,
+                      nrounds = nrounds_barrel, objective = "binary:logistic")
 
 
 xgb_valid <- valid %>%
@@ -165,8 +278,8 @@ sc$xBarrel <- full_barrel_preds
 
 chance_label <- train$chance
 
-chance_cv <- xgb.cv(data = as.matrix(xgb_data), label = chance_label, nrounds = 175, nthread = 2, nfold = 5,
-                    metrics = "logloss", max_depth = 3, eta = 1, objective = "binary:logistic")
+chance_cv <- xgb.cv(data = as.matrix(xgb_data), label = chance_label, nrounds = 175, nfold = 5,
+                    metrics = "logloss", eta = 0.1, objective = "binary:logistic")
 
 # getting the proper number of model iterations to prevent under/overfitting
 eval_log <- as.data.frame(chance_cv$evaluation_log)
@@ -174,8 +287,8 @@ nrounds_chance <- which.min(eval_log$test_logloss_mean)
 #nrounds_chance <- 136
 
 # train models
-chance_mod <- xgboost(data = as.matrix(xgb_data), label = chance_label, max.depth = 3,
-                      eta = 1, nthread = 2, nrounds = nrounds_chance, objective = "binary:logistic")
+chance_mod <- xgboost(data = as.matrix(xgb_data), label = chance_label,
+                      eta = 0.1, nrounds = nrounds_chance, objective = "binary:logistic")
 
 
 chance_preds <- predict(chance_mod, as.matrix(xgb_valid))
@@ -199,7 +312,14 @@ xgb.ggplot.importance(barrel_importance[1:10,]) +
     title = "Feature Importance for XGBoost Model Predicting Barrels"
   )
 
-xgb.plot.importance(chance_importance[1:10,])
+xgb.ggplot.importance(chance_importance[1:10,]) +
+  theme_bw() +
+  theme(
+    legend.position = "none"
+  ) +
+  labs(
+    title = "Feature Importance for XGBoost Model Predicting 'Chances'"
+  )
 
 full_chance_preds <- predict(chance_mod, as.matrix(data))
 
@@ -211,10 +331,13 @@ mistake_thresh <- 0.1
 
 ##### PLOTS ####################################################################
 
+# "mistakes" plot
 sc %>%
-  filter(xBarrel > mistake_thresh) %>%
+  arrange(desc(xBarrel)) %>%
+  mutate(pitch_name = ifelse(pitch_name == "Fastball", "4-Seam Fastball", pitch_name)) %>%
+  filter(row_number() < (nrow(sc) * 0.015)) %>%
   ggplot(aes(plate_x, plate_z)) +
-  geom_point(size = 4, alpha = 0.5, aes(color = stand)) +
+  geom_point(size = 4, alpha = 0.3, aes(color = stand)) +
   geom_segment(x = -5/6, y = 3.67, xend = -5/6 , yend = 1.52) + # draw strikezone
   geom_segment(x = 5/6, y = 3.67, xend = 5/6 , yend = 1.52) +
   geom_segment(x = -5/6, y = 3.67, xend = 5/6 , yend = 3.67) +
@@ -222,8 +345,19 @@ sc %>%
   coord_fixed() +
   theme_bw() +
   xlim(-1,1) +
-  ylim(1.5,3.75)
+  ylim(1.5,3.75) +
+  facet_wrap(~pitch_name) +
+  labs(
+    title = "Mistake Pitches By Pitch Type",
+    subtitle = "2021 MLB Season",
+    x = "Horizontal Plate Location",
+    y = "Vertical Plate Location"
+  ) +
+  scale_color_discrete(name = "Batter Side")
+  
 
+
+# barrels plot
 sc %>%
   filter(barrel == 1) %>%
   ggplot(aes(plate_x, plate_z)) +
@@ -256,11 +390,43 @@ p_barrels <- sc %>%
             barrel_rate = barrels/pitches,
             xbarrel_rate = xbarrels / pitches,
             xbpc = xbarrels/xchances) %>%
-  left_join(chadwick_player_lu_table, by = c("pitcher" = "key_mlbam"))
+  left_join(chadwick_player_lu_table, by = c("pitcher" = "key_mlbam")) %>%
+  mutate(name = str_c(name_first, name_last, sep = " ")) %>%
+  select(-pitcher, -name_first, -name_last)
 
 p_barrels %>%
-  filter(pitches > 750) %>%
-  arrange((xbpc))
+  filter(pitches > 1500) %>%
+  arrange(desc(xbpc)) %>%
+  select(-mistakes, -barrel_rate, -xbarrel_rate) %>%
+  select(name, everything()) %>%
+  head(10) %>%
+  gt() %>%
+  tab_header(
+    title = "Top 10 Mistake Prone Pitchers, 2021 MLB Season",
+    subtitle = "1500 pitch min."
+  ) %>%
+  tab_options(
+    heading.title.font.weight = "bold",
+    table.width = px(700)
+  ) %>%
+  opt_row_striping() %>%
+  cols_label(
+    name = "Pitcher",
+    pitches = "Pitches",
+    chances = "Chances",
+    barrels = "Barrels",
+    xbarrels = "xBarrels (xB)",
+    xchances = "xChances (xC)",
+    xbpc = "xB/xC"
+  ) %>%
+  opt_align_table_header(align = "left") %>%
+  fmt_number(columns = xbpc, decimals = 4) %>%
+  fmt_number(columns = xbarrels, decimals = 2)
+  
+  
+p_barrels %>%
+  filter(pitches > 1500) %>%
+  arrange(desc(chances - xchances))
 
 b_barrels <- sc %>%
   group_by(batter) %>%
@@ -342,9 +508,18 @@ sc %>%
 # top X % of each batter's batted balls, where X is the percentage of total balls in play that are barrels 
 
 sc %>%
-  filter(type == "X") %>%
+  mutate(barrel = ifelse(is.na(barrel), 0, barrel)) %>%
   summarize(prop = sum(barrel, na.rm = TRUE)/n())
 # About 7.5 % of all batted balls are barrels
+
+sc %>%
+  arrange(desc(xBarrel)) %>%
+  filter(row_number() < (nrow(sc) * 0.015)) %>%
+  arrange(xBarrel)
+
+sc %>%
+  filter(xBarrel >= 0.1) %>%
+  arrange(xBarrel)
 
 # Let's do some binning and look at results that way.
 
@@ -359,11 +534,3 @@ sc %>%
             n = n())
 
 colSums(is.na(sc))
-
-
-# Let's write a for loop that goes through each pitch and splits the data into 4 or 5 partitions
-# by some feature like x_mov or velocity then we can summarize these partitions by barrel rate or xbarrels etc.
-
-
-# loss is .0674 for original model
-# the loss is .0676 for the other model.
