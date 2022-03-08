@@ -1,5 +1,5 @@
 ---
-title: "Mistake Pitches"
+title: "Predicting Barrels From Pitch Characteristics to Examine Pitcher Mistakes"
 author: "Justin Ford"
 date: "2/8/2022"
 output: 
@@ -15,13 +15,13 @@ knitr::opts_chunk$set(echo = FALSE,
 
 ## What makes a mistake?
 
-You know it when you see it: the batter's eyes light up, the pitcher's gaze drops to the ground just as the bat connects. A meatball. Even casual baseball fans probably have some familiarity with the concept of a so-called "mistake pitch." The breaking ball that doesn't *quite* break enough, the fastball right down Broadway. Ultimately, I think the simplest definition of a mistake pitch is a pitch that's not just likely to get hit, but likely to get *crushed.* Of course, not every pitch that gets crushed should be classified as a "mistake," nor is every inaccuracy punished by the hitter. Sometimes, a batter puts a good swing on a good pitch. Then how can we discern if a pitch is likely to get crushed or not? What makes a pitch a mistake pitch?
+You know it when you see it: the batter's eyes light up, the pitcher's gaze drops to the ground just as the bat connects. A meatball. Even casual baseball fans probably have some familiarity with the concept of a so-called "mistake pitch." The breaking ball that doesn't *quite* break enough, the fastball right down Broadway. Ultimately, I think the simplest definition of a mistake pitch is a pitch that's not just likely to get hit, but likely to get *crushed.* Of course, not every pitch that gets crushed should be classified as a "mistake," nor is every inaccuracy properly punished by the hitter. Sometimes, a batter puts a good swing on a good pitch. Then how can we discern if a pitch is likely to get crushed or not? What makes a pitch a mistake pitch?
 
 The first step is to find out what exactly "crushed" means. There are a few ways to do this: 
 
-*   Set a threshold for run value, where all batted balls over the threshold are considered crushed. However, run values don't always correlate closely with how "well-hit" a batted ball is. Bloopers tend to have a high run value because they fall for hits often, but wouldn't be considered to be hit squarely or hard. 
+*   Set a threshold for run value, so that all batted balls over the threshold are considered crushed. However, run values don't always correlate closely with how "well-hit" a batted ball is. Bloopers tend to have a high run value because they fall for hits often, but wouldn't be considered to be hit squarely or hard. 
 *   Use Statcast's Barrel classification as a proxy for "crushed." This is the simplest and most direct option, because these are literally the batted balls that Statcast defines as "hit well." The one issue with using barrels is that batters will have widely differing abilities to hit barrels. Some hitters, like David Fletcher or Myles Straw, will rarely ever have a batted ball classified as a "Barrel," even if they hit it as well as they can. Does that mean it's impossible to throw a mistake pitch to David Fletcher? I don't think so. 
-*   Use the subset of the "best" batted balls by each hitter. This solves the problem with using Statcast Barrels. However, I would need to devise a system to come up with evaluating with batted balls are the "best," or rather, "most crushed." The best way I could think to evaluate batted balls is by using run values or the built-in "estimated_woba_using_speedangle" column. Of course, this then presents us with the same problem we saw in option 1, where estimated_woba_using_speedangle isn't necessarily a measure of how well a ball is hit in the same way that Barrels are.
+*   Use a subset of the "best" batted balls by each hitter. This solves the problem with using Statcast Barrels. However, I would need to devise a system to come up with evaluating with batted balls are the "best," or rather, "most crushed." The best way I could think to evaluate batted balls is by using run values or the built-in "estimated_woba_using_speedangle" column of the Statcast csv. Of course, this then presents us with the same problem we saw in option 1; estimated_woba_using_speedangle isn't necessarily a measure of how well a ball is hit in the same way that Barrels are.
 
 For simplicity's sake, I decided to just use Barrels as my stand-in for "crushed." It is the most direct measure of what I mean by "crushed" that I have readily available.
 
@@ -233,6 +233,46 @@ sc %>%
 As we would expect, pitches nearest the middle of the zone have the highest probability of getting barreled according to the model.
 \
 
+## Pitcher Mistakes
+
+Since we have the probability that every pitch will be barreled, we can plot the pitches with the highest barrel probability (these are our "mistakes"). I'm taking the top 1.5% of pitches to be our "mistakes," since this is roughly the percentage of pitches that are barreled league-wide.
+
+```{r mistake_plot, fig.asp=1, fig_width = 15, echo=FALSE}
+
+# "mistakes" plot
+sc %>%
+  arrange(desc(xBarrel)) %>%
+  mutate(pitch_name = ifelse(pitch_name == "Fastball", "4-Seam Fastball", pitch_name)) %>%
+  filter(row_number() < (nrow(sc) * 0.015)) %>%
+  ggplot(aes(plate_x, plate_z)) +
+  geom_point(size = 4, alpha = 0.3, aes(color = stand)) +
+  geom_segment(x = -5/6, y = 3.67, xend = -5/6 , yend = 1.52) + # draw strikezone
+  geom_segment(x = 5/6, y = 3.67, xend = 5/6 , yend = 1.52) +
+  geom_segment(x = -5/6, y = 3.67, xend = 5/6 , yend = 3.67) +
+  geom_segment(x = -5/6, y = 1.52, xend = 5/6 , yend = 1.52) +
+  coord_fixed() +
+  theme_bw() +
+  xlim(-1,1) +
+  ylim(1.5,3.75) +
+  facet_wrap(~pitch_name) +
+  labs(
+    title = "Mistake Pitch Locations By Pitch Type, 2021 MLB Season",
+    subtitle = "Catcher's Perspective",
+    x = "Horizontal Plate Location",
+    y = "Vertical Plate Location"
+  ) +
+  scale_color_discrete(name = "Batter Side") +
+  theme(axis.text.x=element_blank(),
+        axis.text.y=element_blank())
+
+
+```
+
+
+\
+Once again, we see how many mistakes are pitches that are left over the middle of the plate, for all pitch types. We can also see how more mistakes tend to be made on the inside part of the plate. Also, breaking balls and offspeed pitches up in the zone don't really show up here as "mistakes," as maybe conventional wisdom would suggest. 
+\
+
 ## Which Pitchers Avoid Mistakes?
 
 Now that we have a way to quantify how much of a mistake a pitch is (barrel probability, which I will also call xBarrels), we can look at the pitchers who are the best and worst at avoiding these pitches. However, I don't just want to look at who throws the most mistake pitches, I want to see which pitchers are able to prevent hard hits while also throwing pitches that get lots of swings and called strikes. A pitcher who throws 55 foot curveballs every pitch technically isn't throwing any mistake pitches by our definition, because those pitchers are essentially impossible to barrel. Those pitches, though, have little chance of accomplishing anything positive for the pitcher's team. So, I trained another model which attempted to predict the likelihood that a pitch would either be: a) swung at, or b) called for a strike. I call this likelihood "xChance" (i.e. the "chance" that the pitch results in a strike or batted ball). This way, I'm rewarding pitchers that are able to throw strikes *and* avoid mistakes. 
@@ -287,7 +327,7 @@ p_barrels %>%
   ) %>%
   opt_align_table_header(align = "left") %>%
   fmt_number(columns = xbpc, decimals = 4) %>%
-  fmt_number(columns = c(xbarrels, xchances), decimals = 0)
+  fmt_number(columns = c(xbarrels, xchances), decimals = 2)
 
 ```
 
@@ -329,41 +369,99 @@ p_barrels %>%
 ```
 \
 
-## Pitcher Mistakes
+We can also look at what individual pitches are thrown for "mistakes" the most often.
 
-Since we have the probability that every pitch will be barreled, we can plot the pitches with the highest barrel probability (these are our "mistakes"). I'm taking the top 1.5% of pitches to be our "mistakes," since this is roughly the percentage of pitches that are barreled league-wide.
+```{r pitch_barrels}
+pitch_barrels <- sc %>%
+  group_by(pitcher, pitch_name) %>%
+  summarize(pitches = n(),
+            chances = sum(chance),
+            barrels = sum(barrel, na.rm = TRUE),
+            xbarrels = sum(xBarrel),
+            xchances = sum(xChance),
+            barrel_rate = barrels/pitches,
+            xbarrel_rate = xbarrels / pitches,
+            xbpc = xbarrels/xchances) %>%
+  left_join(chadwick_player_lu_table, by = c("pitcher" = "key_mlbam")) %>%
+  mutate(name = str_c(name_first, name_last, sep = " ")) %>%
+  ungroup() %>%
+  select(-pitcher, -name_first, -name_last)
+```
 
+\
 
-```{r mistake_plot, fig.asp=1, fig_width = 15, echo=FALSE}
+```{r pitch_leaderboard1}
 
-# "mistakes" plot
-sc %>%
-  arrange(desc(xBarrel)) %>%
-  mutate(pitch_name = ifelse(pitch_name == "Fastball", "4-Seam Fastball", pitch_name)) %>%
-  filter(row_number() < (nrow(sc) * 0.015)) %>%
-  ggplot(aes(plate_x, plate_z)) +
-  geom_point(size = 4, alpha = 0.3, aes(color = stand)) +
-  geom_segment(x = -5/6, y = 3.67, xend = -5/6 , yend = 1.52) + # draw strikezone
-  geom_segment(x = 5/6, y = 3.67, xend = 5/6 , yend = 1.52) +
-  geom_segment(x = -5/6, y = 3.67, xend = 5/6 , yend = 3.67) +
-  geom_segment(x = -5/6, y = 1.52, xend = 5/6 , yend = 1.52) +
-  coord_fixed() +
-  theme_bw() +
-  xlim(-1,1) +
-  ylim(1.5,3.75) +
-  facet_wrap(~pitch_name) +
-  labs(
-    title = "Mistake Pitches By Pitch Type, 2021 MLB Season",
-    subtitle = "Catcher's Perspective",
-    x = "Horizontal Plate Location",
-    y = "Vertical Plate Location"
-  ) +
-  scale_color_discrete(name = "Batter Side") +
-  theme(axis.text.x=element_blank(),
-        axis.text.y=element_blank())
+pitch_barrels %>%
+  filter(pitches > 500) %>%
+  arrange(desc(xbpc)) %>%
+  select(-barrel_rate, -xbarrel_rate) %>%
+  select(name, everything()) %>%
+  head(10) %>%
+  gt() %>%
+  tab_header(
+    title = "Top 10 Mistake Prone Pitches, 2021 MLB Season",
+    subtitle = "500 pitch min."
+  ) %>%
+  tab_options(
+    heading.title.font.weight = "bold",
+    table.width = px(700)
+  ) %>%
+  opt_row_striping() %>%
+  cols_label(
+    name = "Pitcher",
+    pitch_name = "Pitch",
+    pitches = "Pitches",
+    chances = "Chances",
+    barrels = "Barrels",
+    xbarrels = "xBarrels (xB)",
+    xchances = "xChances (xC)",
+    xbpc = "xB/xC"
+  ) %>%
+  opt_align_table_header(align = "left") %>%
+  fmt_number(columns = xbpc, decimals = 4) %>%
+  fmt_number(columns = xbarrels, decimals = 2)
+```
 
+\
+An interesting one here is Lucas Giolito's changeup, which was actually a very good pitch for him last season (-11 run value according to Baseball Savant), but is significantly outperforming my xB measure. It's not clear to me whether Giolito simply got lucky with his changeup last year (it also graded out well in 2019 and 2020 my run value so this doesn't appear to be very likely), or if there's some attributes of the pitch that aren't captured by my model. Most of the rest of the pitches in this group are fastballs from pitchers with below average velocity, which is the type of pitch I would expect to see get barrelled often.
+\
+
+And finally, the ten pitches least likely to be "mistakes" in 2021.
+\
+```{r pitch_leaderboard2}
+
+pitch_barrels %>%
+  filter(pitches > 500) %>%
+  arrange((xbpc)) %>%
+  select(-barrel_rate, -xbarrel_rate) %>%
+  select(name, everything()) %>%
+  head(10) %>%
+  gt() %>%
+  tab_header(
+    title =  md("Top 10 *Least* Barrel Prone Pitches, 2021 MLB Season"),
+    subtitle = "500 pitch min."
+  ) %>%
+  tab_options(
+    heading.title.font.weight = "bold",
+    table.width = px(700)
+  ) %>%
+  opt_row_striping() %>%
+  cols_label(
+    name = "Pitcher",
+    pitch_name = "Pitch",
+    pitches = "Pitches",
+    chances = "Chances",
+    barrels = "Barrels",
+    xbarrels = "xBarrels (xB)",
+    xchances = "xChances (xC)",
+    xbpc = "xB/xC"
+  ) %>%
+  opt_align_table_header(align = "left") %>%
+  fmt_number(columns = xbpc, decimals = 4) %>%
+  fmt_number(columns = xbarrels, decimals = 2)
 
 ```
 \
-Once again, we see how many mistakes are pitches that are left over the middle of the plate, for all pitch types. We can also see how more mistakes tend to be made on the inside part of the plate. Also, breaking balls and offspeed pitches up in the zone don't really show up here as "mistakes," as maybe conventional wisdom would suggest. 
-
+## Conclusion
+Now we have a bit of a better sense of what makes a mistake pitch, even if what we found out mostly aligns with conventional wisdom. Pitches in the heart of the plate are the most likely to get damage inflicted upon them, and hitters tend to barrel more pitches that creep onto the inside half of the plate. Our model also showed that breaking balls and offspeed pitches up in the zone are not as punished as one might think. 
