@@ -4,7 +4,7 @@ author: "Justin Ford"
 date: "2/8/2022"
 output: 
   html_document:
-    theme: "united"
+    keep_md: TRUE
 ---
 
 ```{r setup, include=FALSE}
@@ -462,6 +462,8 @@ pitch_barrels %>%
   fmt_number(columns = xbarrels, decimals = 2)
 
 ```
-\
+
+
 ## Conclusion
-Now we have a bit of a better sense of what makes a mistake pitch, even if what we found out mostly aligns with conventional wisdom. Pitches in the heart of the plate are the most likely to get damage inflicted upon them, and hitters tend to barrel more pitches that creep onto the inside half of the plate. Our model also showed that breaking balls and offspeed pitches up in the zone are not as punished as one might think. 
+
+Now we have a bit of a better sense of what makes a mistake pitch, even if what we found out mostly aligns with conventional wisdom. Pitches in the heart of the plate are the most likely to get damage inflicted upon them, and hitters tend to barrel more pitches that creep onto the inside half of the plate. Our model also showed that breaking balls and offspeed pitches up in the zone are not as punished as one might think.

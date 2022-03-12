@@ -1,123 +1,73 @@
+---
+title: "Predicting Barrels From Pitch Characteristics to Examine Pitcher Mistakes"
+author: "Justin Ford"
+date: "2/8/2022"
+output: 
+  html_document:
+    keep_md: TRUE
+---
+
+
+
 ## What makes a mistake?
 
-You know it when you see it: the batter’s eyes light up, the pitcher’s
-gaze drops to the ground just as the bat connects. A meatball. Even
-casual baseball fans probably have some familiarity with the concept of
-a so-called “mistake pitch.” The breaking ball that doesn’t *quite*
-break enough, the fastball right down Broadway. Ultimately, I think the
-simplest definition of a mistake pitch is a pitch that’s not just likely
-to get hit, but likely to get *crushed.* Of course, not every pitch that
-gets crushed should be classified as a “mistake,” nor is every
-inaccuracy properly punished by the hitter. Sometimes, a batter puts a
-good swing on a good pitch. Then how can we discern if a pitch is likely
-to get crushed or not? What makes a pitch a mistake pitch?
+You know it when you see it: the batter's eyes light up, the pitcher's gaze drops to the ground just as the bat connects. A meatball. Even casual baseball fans probably have some familiarity with the concept of a so-called "mistake pitch." The breaking ball that doesn't *quite* break enough, the fastball right down Broadway. Ultimately, I think the simplest definition of a mistake pitch is a pitch that's not just likely to get hit, but likely to get *crushed.* Of course, not every pitch that gets crushed should be classified as a "mistake," nor is every inaccuracy properly punished by the hitter. Sometimes, a batter puts a good swing on a good pitch. Then how can we discern if a pitch is likely to get crushed or not? What makes a pitch a mistake pitch?
 
-The first step is to find out what exactly “crushed” means. There are a
-few ways to do this:
+The first step is to find out what exactly "crushed" means. There are a few ways to do this: 
 
--   Set a threshold for run value, so that all batted balls over the
-    threshold are considered crushed. However, run values don’t always
-    correlate closely with how “well-hit” a batted ball is. Bloopers
-    tend to have a high run value because they fall for hits often, but
-    wouldn’t be considered to be hit squarely or hard.
--   Use Statcast’s Barrel classification as a proxy for “crushed.” This
-    is the simplest and most direct option, because these are literally
-    the batted balls that Statcast defines as “hit well.” The one issue
-    with using barrels is that batters will have widely differing
-    abilities to hit barrels. Some hitters, like David Fletcher or Myles
-    Straw, will rarely ever have a batted ball classified as a “Barrel,”
-    even if they hit it as well as they can. Does that mean it’s
-    impossible to throw a mistake pitch to David Fletcher? I don’t think
-    so.
--   Use a subset of the “best” batted balls by each hitter. This solves
-    the problem with using Statcast Barrels. However, I would need to
-    devise a system to come up with evaluating with batted balls are the
-    “best,” or rather, “most crushed.” The best way I could think to
-    evaluate batted balls is by using run values or the built-in
-    “estimated_woba_using_speedangle” column of the Statcast csv. Of
-    course, this then presents us with the same problem we saw in option
-    1; estimated_woba_using_speedangle isn’t necessarily a measure of
-    how well a ball is hit in the same way that Barrels are.
+*   Set a threshold for run value, so that all batted balls over the threshold are considered crushed. However, run values don't always correlate closely with how "well-hit" a batted ball is. Bloopers tend to have a high run value because they fall for hits often, but wouldn't be considered to be hit squarely or hard. 
+*   Use Statcast's Barrel classification as a proxy for "crushed." This is the simplest and most direct option, because these are literally the batted balls that Statcast defines as "hit well." The one issue with using barrels is that batters will have widely differing abilities to hit barrels. Some hitters, like David Fletcher or Myles Straw, will rarely ever have a batted ball classified as a "Barrel," even if they hit it as well as they can. Does that mean it's impossible to throw a mistake pitch to David Fletcher? I don't think so. 
+*   Use a subset of the "best" batted balls by each hitter. This solves the problem with using Statcast Barrels. However, I would need to devise a system to come up with evaluating with batted balls are the "best," or rather, "most crushed." The best way I could think to evaluate batted balls is by using run values or the built-in "estimated_woba_using_speedangle" column of the Statcast csv. Of course, this then presents us with the same problem we saw in option 1; estimated_woba_using_speedangle isn't necessarily a measure of how well a ball is hit in the same way that Barrels are.
 
-For simplicity’s sake, I decided to just use Barrels as my stand-in for
-“crushed.” It is the most direct measure of what I mean by “crushed”
-that I have readily available.
+For simplicity's sake, I decided to just use Barrels as my stand-in for "crushed." It is the most direct measure of what I mean by "crushed" that I have readily available.
 
-So, looking at every pitch from the 2021 season (data retrieved using
-the excellent baseballr package for scraping from Baseball Savant), I
-constructed a model that would predict the probability that a given
-pitch would be barreled.
 
-The features of my model included pitch velocity, location, movement,
-pitcher release point and the count. My model does not include any
-information regarding batter tendencies, or any contextual information
-about the pitcher’s arsenal. It is simply looking on a pitch-by-pitch
-basis, regardless of batter, and trying to determine how often that
-pitch gets barreled on average.
 
-After training the model, we can look at what features of the data
-contribute the most to correctly predicting whether the pitch was
-barreled or not.
+So, looking at every pitch from the 2021 season (data retrieved using the excellent baseballr package for scraping from Baseball Savant), I constructed a model that would predict the probability that a given pitch would be barreled. 
 
-![](mistakes_files/figure-markdown_github/importance-1.png)
 
-A more complete description of what some of these attributes are
-measuring can be found [here](https://baseballsavant.mlb.com/csv-docs),
-but essentially plate_z and plate_x refer to vertical and horizontal
-location respectively. These are by far the most important features for
-them model. This is probably as expected, though I would’ve expected
-movement (pfx_x and pfx_z are the measurements for movement) to be a
-bigger contributor.
 
-We can bin pitches by their location and look at the average barrel
-probability for pitches in each bin.
+The features of my model included pitch velocity, location, movement, pitcher release point and the count. My model does not include any information regarding batter tendencies, or any contextual information about the pitcher's arsenal. It is simply looking on a pitch-by-pitch basis, regardless of batter, and trying to determine how often that pitch gets barreled on average.
 
-![](mistakes_files/figure-markdown_github/xbarrel_plot-1.png)  
-As we would expect, pitches nearest the middle of the zone have the
-highest probability of getting barreled according to the model.  
+
+
+
+
+
+After training the model, we can look at what features of the data contribute the most to correctly predicting whether the pitch was barreled or not.
+
+![](mistakes_files/figure-html/importance-1.png)<!-- -->
+
+A more complete description of what some of these attributes are measuring can be found [here](https://baseballsavant.mlb.com/csv-docs), but essentially plate_z and plate_x refer to vertical and horizontal location respectively. These are by far the most important features for them model. This is probably as expected, though I would've expected movement (pfx_x and pfx_z are the measurements for movement) to be a bigger contributor.
+
+
+
+We can bin pitches by their location and look at the average barrel probability for pitches in each bin.
+
+![](mistakes_files/figure-html/xbarrel_plot-1.png)<!-- -->
+\
+As we would expect, pitches nearest the middle of the zone have the highest probability of getting barreled according to the model.
+\
 
 ## Pitcher Mistakes
 
-Since we have the probability that every pitch will be barreled, we can
-plot the pitches with the highest barrel probability (these are our
-“mistakes”). I’m taking the top 1.5% of pitches to be our “mistakes,”
-since this is roughly the percentage of pitches that are barreled
-league-wide.
+Since we have the probability that every pitch will be barreled, we can plot the pitches with the highest barrel probability (these are our "mistakes"). I'm taking the top 1.5% of pitches to be our "mistakes," since this is roughly the percentage of pitches that are barreled league-wide.
 
-![](mistakes_files/figure-markdown_github/mistake_plot-1.png)
+![](mistakes_files/figure-html/mistake_plot-1.png)<!-- -->
 
-  
-Once again, we see how many mistakes are pitches that are left over the
-middle of the plate, for all pitch types. We can also see how more
-mistakes tend to be made on the inside part of the plate. Also, breaking
-balls and offspeed pitches up in the zone don’t really show up here as
-“mistakes,” as maybe conventional wisdom would suggest.  
+
+\
+Once again, we see how many mistakes are pitches that are left over the middle of the plate, for all pitch types. We can also see how more mistakes tend to be made on the inside part of the plate. Also, breaking balls and offspeed pitches up in the zone don't really show up here as "mistakes," as maybe conventional wisdom would suggest. 
+\
 
 ## Which Pitchers Avoid Mistakes?
 
-Now that we have a way to quantify how much of a mistake a pitch is
-(barrel probability, which I will also call xBarrels), we can look at
-the pitchers who are the best and worst at avoiding these pitches.
-However, I don’t just want to look at who throws the most mistake
-pitches, I want to see which pitchers are able to prevent hard hits
-while also throwing pitches that get lots of swings and called strikes.
-A pitcher who throws 55 foot curveballs every pitch technically isn’t
-throwing any mistake pitches by our definition, because those pitchers
-are essentially impossible to barrel. Those pitches, though, have little
-chance of accomplishing anything positive for the pitcher’s team. So, I
-trained another model which attempted to predict the likelihood that a
-pitch would either be: a) swung at, or b) called for a strike. I call
-this likelihood “xChance” (i.e. the “chance” that the pitch results in a
-strike or batted ball). This way, I’m rewarding pitchers that are able
-to throw strikes *and* avoid mistakes.
+Now that we have a way to quantify how much of a mistake a pitch is (barrel probability, which I will also call xBarrels), we can look at the pitchers who are the best and worst at avoiding these pitches. However, I don't just want to look at who throws the most mistake pitches, I want to see which pitchers are able to prevent hard hits while also throwing pitches that get lots of swings and called strikes. A pitcher who throws 55 foot curveballs every pitch technically isn't throwing any mistake pitches by our definition, because those pitchers are essentially impossible to barrel. Those pitches, though, have little chance of accomplishing anything positive for the pitcher's team. So, I trained another model which attempted to predict the likelihood that a pitch would either be: a) swung at, or b) called for a strike. I call this likelihood "xChance" (i.e. the "chance" that the pitch results in a strike or batted ball). This way, I'm rewarding pitchers that are able to throw strikes *and* avoid mistakes. 
 
-So we have a measure for the number of “mistakes” a pitcher made
-(xBarrels), and a measure for the number of “chances” that a pitcher
-allows for batters to barrel a pitch. We can simply take the proportion
-of xChances that end up as xBarrels for each pitcher, and we will have a
-good measure for determining pitchers that throw highly barrelable
-pitches:
+So we have a measure for the number of "mistakes" a pitcher made (xBarrels), and a measure for the number of "chances" that a pitcher allows for batters to barrel a pitch. We can simply take the proportion of xChances that end up as xBarrels for each pitcher, and we will have a good measure for determining pitchers that throw highly barrelable pitches:
 
+
+```{=html}
 <div id="lkbivobqsu" style="overflow-x:auto;overflow-y:auto;width:auto;height:auto;">
 <style>html {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Helvetica Neue', 'Fira Sans', 'Droid Sans', Arial, sans-serif;
@@ -617,12 +567,14 @@ pitches:
   
 </table>
 </div>
+```
 
-  
+\
 And the pitchers who are the best at throwing hard-to-barrel pitches:
 
-  
+\
 
+```{=html}
 <div id="bwwnhrbbyz" style="overflow-x:auto;overflow-y:auto;width:auto;height:auto;">
 <style>html {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Helvetica Neue', 'Fira Sans', 'Droid Sans', Arial, sans-serif;
@@ -1122,14 +1074,17 @@ And the pitchers who are the best at throwing hard-to-barrel pitches:
   
 </table>
 </div>
+```
+\
 
-  
+We can also look at what individual pitches are thrown for "mistakes" the most often.
 
-We can also look at what individual pitches are thrown for “mistakes”
-the most often.
 
-  
 
+\
+
+
+```{=html}
 <div id="whsaaoqqww" style="overflow-x:auto;overflow-y:auto;width:auto;height:auto;">
 <style>html {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Helvetica Neue', 'Fira Sans', 'Droid Sans', Arial, sans-serif;
@@ -1640,20 +1595,16 @@ the most often.
   
 </table>
 </div>
+```
 
-  
-An interesting one here is Lucas Giolito’s changeup, which was actually
-a very good pitch for him last season (-11 run value according to
-Baseball Savant), but is significantly outperforming my xB measure. It’s
-not clear to me whether Giolito simply got lucky with his changeup last
-year (it also graded out well in 2019 and 2020 my run value so this
-doesn’t appear to be very likely), or if there’s some attributes of the
-pitch that aren’t captured by my model. Most of the rest of the pitches
-in this group are fastballs from pitchers with below average velocity,
-which is the type of pitch I would expect to see get barrelled often.  
+\
+An interesting one here is Lucas Giolito's changeup, which was actually a very good pitch for him last season (-11 run value according to Baseball Savant), but is significantly outperforming my xB measure. It's not clear to me whether Giolito simply got lucky with his changeup last year (it also graded out well in 2019 and 2020 my run value so this doesn't appear to be very likely), or if there's some attributes of the pitch that aren't captured by my model. Most of the rest of the pitches in this group are fastballs from pitchers with below average velocity, which is the type of pitch I would expect to see get barrelled often.
+\
 
-And finally, the ten pitches least likely to be “mistakes” in 2021.  
+And finally, the ten pitches least likely to be "mistakes" in 2021.
+\
 
+```{=html}
 <div id="ekajcpjtfz" style="overflow-x:auto;overflow-y:auto;width:auto;height:auto;">
 <style>html {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Helvetica Neue', 'Fira Sans', 'Droid Sans', Arial, sans-serif;
@@ -2164,12 +2115,9 @@ And finally, the ten pitches least likely to be “mistakes” in 2021.
   
 </table>
 </div>
+```
+
 
 ## Conclusion
 
-Now we have a bit of a better sense of what makes a mistake pitch, even
-if what we found out mostly aligns with conventional wisdom. Pitches in
-the heart of the plate are the most likely to get damage inflicted upon
-them, and hitters tend to barrel more pitches that creep onto the inside
-half of the plate. Our model also showed that breaking balls and
-offspeed pitches up in the zone are not as punished as one might think.
+Now we have a bit of a better sense of what makes a mistake pitch, even if what we found out mostly aligns with conventional wisdom. Pitches in the heart of the plate are the most likely to get damage inflicted upon them, and hitters tend to barrel more pitches that creep onto the inside half of the plate. Our model also showed that breaking balls and offspeed pitches up in the zone are not as punished as one might think.
