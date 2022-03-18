@@ -2,9 +2,9 @@
 title: "Predicting Barrels From Pitch Characteristics to Examine Pitcher Mistakes"
 author: "Justin Ford"
 date: "2/8/2022"
-output: 
-  html_document:
-    keep_md: TRUE
+output:
+  pdf_document: default
+
 ---
 
 ```{r setup, include=FALSE}
